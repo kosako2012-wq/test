@@ -25,6 +25,8 @@ object Timer {
     const val CH_STATUS = "status_v1"    // 動いている間の残り時間表示（静か）
     const val ID_ALERT = 10
     const val ID_STATUS = 11
+    const val ID_END = 12
+    const val CH_END = "end_v1"          // 休憩おわり（音だけ）
     const val ALERT_LIMIT_MS = 60_000L   // OKを押さなくても1分で止める
 
     // ---------- 状態 ----------
@@ -101,23 +103,41 @@ object Timer {
         nm(ctx).cancel(ID_ALERT)
     }
 
-    /** 予約した時刻が来たとき（AlarmReceiverから呼ばれる） */
+    /** 予約した時刻が来たとき（AlarmReceiverから呼ばれる）
+     *  使う時間が終わった → 画面いっぱいの「止める」画面＋音で知らせ、休憩を始める
+     *  休憩が終わった → 音だけで知らせて、自動で終了（くり返さない） */
     fun onAlarm(ctx: Context) {
         val s = load(ctx)
         if (!s.running || s.phase == IDLE) return
-        val toRest = s.phase == WORK
-        val nextPhase = if (toRest) REST else WORK
-        val total = (if (toRest) s.restMin else s.workMin) * 60_000L
-        val n = s.copy(
-            phase = nextPhase,
-            round = if (toRest) s.round else s.round + 1,
-            total = total, remain = total,
-            endAt = System.currentTimeMillis() + total
-        )
-        save(ctx, n)
-        schedule(ctx, n.endAt)
-        showAlert(ctx, toRest, n)
-        showStatus(ctx, n)
+        if (s.phase == WORK) {
+            val total = s.restMin * 60_000L
+            val n = s.copy(phase = REST, total = total, remain = total,
+                endAt = System.currentTimeMillis() + total)
+            save(ctx, n)
+            schedule(ctx, n.endAt)
+            showAlert(ctx, true, n)
+            showStatus(ctx, n)
+        } else {
+            val ms = s.workMin * 60_000L
+            save(ctx, s.copy(phase = IDLE, running = false, round = 0, remain = ms, total = ms, endAt = 0))
+            cancelAlarm(ctx)
+            nm(ctx).cancel(ID_STATUS)
+            showRestEnd(ctx)
+        }
+    }
+
+    /** 休憩おわり：音だけで知らせる（画面は出さない） */
+    private fun showRestEnd(ctx: Context) {
+        ensureChannels(ctx)
+        val n = Notification.Builder(ctx, CH_END)
+            .setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle("休憩おわり")
+            .setContentText("タイマーは終了しました")
+            .setContentIntent(openAppPI(ctx))
+            .setAutoCancel(true)
+            .setTimeoutAfter(ALERT_LIMIT_MS)
+            .build()
+        nm(ctx).notify(ID_END, n)
     }
 
     /** 再起動のあとに予約をかけ直す */
@@ -169,6 +189,17 @@ object Timer {
             ch.enableVibration(true)
             ch.vibrationPattern = longArrayOf(0, 600, 300, 600, 300, 600)
             ch.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            m.createNotificationChannel(ch)
+        }
+        if (m.getNotificationChannel(CH_END) == null) {
+            val ch = NotificationChannel(CH_END, "休憩おわりの音", NotificationManager.IMPORTANCE_DEFAULT)
+            ch.description = "休憩が終わったときに、音だけで知らせます（画面は出ません）"
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            ch.setSound(uri, AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+            ch.enableVibration(false)
             m.createNotificationChannel(ch)
         }
         if (m.getNotificationChannel(CH_STATUS) == null) {
@@ -231,7 +262,7 @@ object Timer {
     fun showStatus(ctx: Context, s: State) {
         ensureChannels(ctx)
         if (s.phase == IDLE) { nm(ctx).cancel(ID_STATUS); return }
-        val label = if (s.phase == WORK) "使う時間（${s.round}回目）" else "休憩中"
+        val label = if (s.phase == WORK) "使う時間" else "休憩中"
         val b = Notification.Builder(ctx, CH_STATUS)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle(label)

@@ -112,7 +112,8 @@ class MainActivity : Activity() {
             "・時間になると、YouTubeなどを見ていても画面いっぱいに「止める」ボタンが出て、音と振動で知らせます。\n" +
             "・画面が消えているときは、全画面で知らせます。\n" +
             "・大きな「止める」ボタンを押すと音が止まります。押さなくても1分で止まります。\n" +
-            "・タイマーそのものを終わらせるときは、このアプリで「リセット」を押します。\n" +
+            "・休憩が終わると音だけで知らせて、タイマーは自動で終わります（くり返しません）。\n" +
+            "・途中でやめるときは、このアプリで「リセット」を押します。\n" +
             "・音の大きさは、Galaxyの「アラーム」の音量で決まります（普段の通知音とは別）。\n" +
             "・このアプリを閉じても、タイマーは動き続けます。",
             14f, Ui.SUB), Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 8)))
@@ -174,8 +175,8 @@ class MainActivity : Activity() {
         modeLabel.background = Ui.round(bg, 999, this)
         timeText.setTextColor(if (s.phase == Timer.REST) Ui.REST else Ui.INK)
         roundText.text = when (s.phase) {
-            Timer.WORK -> "${s.round}回目"
-            Timer.REST -> "画面から離れましょう"
+            Timer.WORK -> "終わったら休憩です"
+            Timer.REST -> "休憩が終わると自動で終了します"
             else -> "「スタート」で始まります"
         }
         startBtn.text = when {
