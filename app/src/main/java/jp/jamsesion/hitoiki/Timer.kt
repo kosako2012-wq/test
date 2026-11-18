@@ -214,7 +214,19 @@ object Timer {
         val n = b.build()
         n.flags = n.flags or Notification.FLAG_INSISTENT  // OKを押すまで鳴り続ける（最長1分）
         nm(ctx).notify(ID_ALERT, n)
+
+        // 「ほかのアプリの上に表示」が許可されていれば、YouTubeなどを見ていても
+        // 画面いっぱいの「止める」画面を出す
+        if (!test && canOverlay(ctx)) {
+            try {
+                ctx.startActivity(Intent(ctx, AlertActivity::class.java)
+                    .putExtra("title", title).putExtra("text", text).putExtra("toRest", toRest)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (e: Exception) { }
+        }
     }
+
+    fun canOverlay(ctx: Context): Boolean = android.provider.Settings.canDrawOverlays(ctx)
 
     fun showStatus(ctx: Context, s: State) {
         ensureChannels(ctx)

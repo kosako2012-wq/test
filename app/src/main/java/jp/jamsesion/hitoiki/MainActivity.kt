@@ -109,14 +109,17 @@ class MainActivity : Activity() {
         val note = Ui.card(c)
         note.addView(Ui.text(c, "お知らせの方法", 16f, bold = true))
         note.addView(Ui.text(c,
-            "・時間になると、YouTubeなどを見ていても画面の上に割り込んで、音と振動で知らせます。\n" +
+            "・時間になると、YouTubeなどを見ていても画面いっぱいに「止める」ボタンが出て、音と振動で知らせます。\n" +
             "・画面が消えているときは、全画面で知らせます。\n" +
-            "・音は「OK」を押すまで鳴り、押さなくても1分で止まります。\n" +
+            "・大きな「止める」ボタンを押すと音が止まります。押さなくても1分で止まります。\n" +
+            "・タイマーそのものを終わらせるときは、このアプリで「リセット」を押します。\n" +
             "・音の大きさは、Galaxyの「アラーム」の音量で決まります（普段の通知音とは別）。\n" +
             "・このアプリを閉じても、タイマーは動き続けます。",
             14f, Ui.SUB), Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 8)))
         note.addView(Ui.button(c, "音を試す", 0xFFF3EFE9.toInt(), Ui.INK, 16f, 50) {
             Timer.showAlert(c, true, null, test = true)
+            startActivity(Intent(c, AlertActivity::class.java)
+                .putExtra("title", "お知らせのテスト").putExtra("text", "時間になると、この画面が出ます").putExtra("toRest", true))
         }, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 12)))
         note.addView(Ui.button(c, "音・振動の細かい設定", 0xFFF3EFE9.toInt(), Ui.INK, 16f, 50) {
             startActivity(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
@@ -200,6 +203,8 @@ class MainActivity : Activity() {
     private fun permissionProblem(): String? = when {
         !notificationsAllowed() ->
             "⚠ お知らせ（通知）が許可されていません。\n下のボタンから「通知を許可」をオンにしてください。"
+        !Timer.canOverlay(this) ->
+            "⚠ YouTubeなどを見ているときに、画面いっぱいの「止める」画面を出すには許可が必要です。\n下のボタンから「ひと息タイマー」を探して、「他のアプリの上に表示」（または「最前面に表示」）をオンにしてください。"
         !Timer.canFullScreen(this) ->
             "⚠ 画面が消えているときの全画面表示が許可されていません。\n下のボタンから「全画面通知」を許可してください。"
         else -> null
@@ -208,6 +213,8 @@ class MainActivity : Activity() {
     private fun openPermSettings() {
         val i = if (!notificationsAllowed()) {
             Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        } else if (!Timer.canOverlay(this)) {
+            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
         } else if (Build.VERSION.SDK_INT >= 34) {
             Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName"))
         } else {
