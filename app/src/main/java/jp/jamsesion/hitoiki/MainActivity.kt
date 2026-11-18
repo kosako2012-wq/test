@@ -72,7 +72,7 @@ class MainActivity : Activity() {
         col.addView(roundText)
 
         val controls = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
-        startBtn = Ui.button(c, "スタート", Ui.INK, 0xFFFFFFFF.toInt()) { onStart() }
+        startBtn = Ui.button(c, "スタート", Ui.INK, 0xFFFFFFFF.toInt()) { onStartPressed() }
         controls.addView(startBtn, Ui.lp(0, WRAP_CONTENT, 2f))
         val reset = Ui.button(c, "リセット", 0xFFE9E4DC.toInt(), Ui.INK) { Timer.reset(c); render() }
         controls.addView(reset, Ui.lp(0, WRAP_CONTENT, 1f).apply { leftMargin = Ui.dp(c, 12) })
@@ -148,7 +148,7 @@ class MainActivity : Activity() {
         return row to v
     }
 
-    private fun onStart() {
+    private fun onStartPressed() {
         val s = Timer.load(this)
         when {
             s.running -> Timer.pause(this)
