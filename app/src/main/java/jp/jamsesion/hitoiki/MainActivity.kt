@@ -2,8 +2,12 @@ package jp.jamsesion.hitoiki
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.Ringtone
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,9 +19,14 @@ import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.NumberPicker
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
+import android.widget.Toast
+import java.util.Calendar
 
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -32,6 +41,20 @@ class MainActivity : Activity() {
     private lateinit var permText: TextView
     private lateinit var permBtn: Button
 
+    // 切り替え（タイマー／アラーム）
+    private lateinit var tabTimer: Button
+    private lateinit var tabAlarm: Button
+    private lateinit var timerBox: LinearLayout
+    private lateinit var alarmBox: LinearLayout
+    private lateinit var alarmList: LinearLayout
+    private var tab = "timer"
+
+    // アラームを直している途中の音
+    private var editSound = ""
+    private var editSoundLabel: TextView? = null
+    private var preview: Ringtone? = null
+    private val PICK_SOUND = 77
+
     private val ticker = object : Runnable {
         override fun run() { render(); handler.postDelayed(this, 250) }
     }
@@ -41,15 +64,23 @@ class MainActivity : Activity() {
         window.statusBarColor = Ui.BG
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
         Timer.ensureChannels(this)
+        tab = getSharedPreferences("ui", MODE_PRIVATE).getString("tab", "timer") ?: "timer"
+        intent?.getStringExtra("tab")?.let { tab = it }
         setContentView(build())
+        showTab(tab)
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
     }
 
-    override fun onResume() { super.onResume(); handler.post(ticker) }
-    override fun onPause() { handler.removeCallbacks(ticker); super.onPause() }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra("tab")?.let { showTab(it) }
+    }
+
+    override fun onResume() { super.onResume(); handler.post(ticker); renderAlarms() }
+    override fun onPause() { handler.removeCallbacks(ticker); stopPreview(); super.onPause() }
 
     private fun build(): View {
         val c = this
@@ -59,12 +90,55 @@ class MainActivity : Activity() {
         }
         col.addView(Ui.text(c, "ひと息タイマー", 22f, bold = true, center = true))
 
+        // タイマー／アラームの切り替え
+        val tabs = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
+        tabTimer = Ui.button(c, "⏳ タイマー", Ui.INK, 0xFFFFFFFF.toInt(), 17f, 50) { showTab("timer") }
+        tabAlarm = Ui.button(c, "⏰ アラーム", Ui.CHIP, Ui.INK, 17f, 50) { showTab("alarm") }
+        tabs.addView(tabTimer, Ui.lp(0, WRAP_CONTENT, 1f))
+        tabs.addView(tabAlarm, Ui.lp(0, WRAP_CONTENT, 1f).apply { leftMargin = Ui.dp(c, 10) })
+        col.addView(tabs, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 12)))
+
+        // 許可が足りないときの案内（どちらの画面でも出す）
+        permCard = Ui.card(c, Ui.WARN)
+        permText = Ui.text(c, "", 15f)
+        permCard.addView(permText)
+        permBtn = Ui.button(c, "設定を開く", Ui.INK, 0xFFFFFFFF.toInt(), 16f, 50) { openPermSettings() }
+        permCard.addView(permBtn, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 10)))
+        col.addView(permCard, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 14)))
+
+        timerBox = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+        buildTimer(timerBox)
+        col.addView(timerBox, Ui.lp(MATCH_PARENT, WRAP_CONTENT))
+
+        alarmBox = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+        buildAlarm(alarmBox)
+        col.addView(alarmBox, Ui.lp(MATCH_PARENT, WRAP_CONTENT))
+
+        return ScrollView(c).apply { setBackgroundColor(Ui.BG); addView(col) }
+    }
+
+    private fun showTab(t: String) {
+        tab = if (t == "alarm") "alarm" else "timer"
+        getSharedPreferences("ui", MODE_PRIVATE).edit().putString("tab", tab).apply()
+        val isAlarm = tab == "alarm"
+        timerBox.visibility = if (isAlarm) View.GONE else View.VISIBLE
+        alarmBox.visibility = if (isAlarm) View.VISIBLE else View.GONE
+        tabTimer.background = Ui.round(if (isAlarm) Ui.CHIP else Ui.INK, 16, this)
+        tabTimer.setTextColor(if (isAlarm) Ui.INK else 0xFFFFFFFF.toInt())
+        tabAlarm.background = Ui.round(if (isAlarm) Ui.INK else Ui.CHIP, 16, this)
+        tabAlarm.setTextColor(if (isAlarm) 0xFFFFFFFF.toInt() else Ui.INK)
+        if (isAlarm) renderAlarms()
+    }
+
+    // ================= タイマー =================
+    private fun buildTimer(col: LinearLayout) {
+        val c = this
         modeLabel = Ui.text(c, "", 17f, bold = true, center = true).apply {
             val h = Ui.dp(c, 18); val v = Ui.dp(c, 6); setPadding(h, v, h, v)
         }
         col.addView(LinearLayout(c).apply {
             gravity = Gravity.CENTER; addView(modeLabel)
-        }, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 12)))
+        }, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 16)))
 
         timeText = Ui.text(c, "25:00", 76f, bold = true, center = true)
         col.addView(timeText, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 8)))
@@ -77,14 +151,6 @@ class MainActivity : Activity() {
         val reset = Ui.button(c, "リセット", 0xFFE9E4DC.toInt(), Ui.INK) { Timer.reset(c); render() }
         controls.addView(reset, Ui.lp(0, WRAP_CONTENT, 1f).apply { leftMargin = Ui.dp(c, 12) })
         col.addView(controls, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 20)))
-
-        // 許可が足りないときの案内
-        permCard = Ui.card(c, Ui.WARN)
-        permText = Ui.text(c, "", 15f)
-        permCard.addView(permText)
-        permBtn = Ui.button(c, "設定を開く", Ui.INK, 0xFFFFFFFF.toInt(), 16f, 50) { openPermSettings() }
-        permCard.addView(permBtn, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 10)))
-        col.addView(permCard, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 16)))
 
         // 時間の設定
         settingsCard = Ui.card(c)
@@ -128,8 +194,6 @@ class MainActivity : Activity() {
                 .putExtra(Settings.EXTRA_CHANNEL_ID, Timer.CH_ALERT))
         }, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 8)))
         col.addView(note, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 16)))
-
-        return ScrollView(c).apply { setBackgroundColor(Ui.BG); addView(col) }
     }
 
     private fun stepperRow(label: String, sub: String, isWork: Boolean): Pair<LinearLayout, TextView> {
@@ -199,6 +263,227 @@ class MainActivity : Activity() {
         if (v is LinearLayout) for (i in 0 until v.childCount) setEnabledDeep(v.getChildAt(i), on)
     }
 
+    // ================= アラーム =================
+    private fun buildAlarm(col: LinearLayout) {
+        val c = this
+        col.addView(Ui.button(c, "＋ アラームを追加", Ui.WORK, 0xFFFFFFFF.toInt(), 19f, 60) { openEditor(null) },
+            Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 16)))
+        alarmList = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(alarmList, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 6)))
+
+        val note = Ui.card(c)
+        note.addView(Ui.text(c, "アラームの使い方", 16f, bold = true))
+        note.addView(Ui.text(c,
+            "・カードを押すと、時刻・曜日・メモ・音を直せます。右のスイッチでオン／オフ。\n" +
+            "・曜日を選ばないと「1回だけ」。鳴ったあと自動でオフになります。\n" +
+            "・鳴ると、画面が消えていても、YouTubeなどを見ていても、画面いっぱいに「止める」「${Alarms.SNOOZE_MIN}分後にもう一度」が出ます。\n" +
+            "・押さなくても3分で音は止まります。\n" +
+            "・音の大きさは、Galaxyの「アラーム」の音量で決まります。",
+            14f, Ui.SUB), Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 8)))
+        col.addView(note, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 16)))
+    }
+
+    private fun renderAlarms() {
+        if (!::alarmList.isInitialized) return
+        val c = this
+        alarmList.removeAllViews()
+        val items = Alarms.list(c)
+        if (items.isEmpty()) {
+            alarmList.addView(Ui.text(c, "まだアラームはありません。\n上の「＋ アラームを追加」から登録できます。", 15f, Ui.SUB, center = true),
+                Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 18)))
+            return
+        }
+        items.forEach { a ->
+            val card = Ui.card(c)
+            val row = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val left = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+            val on = a.enabled
+            left.addView(Ui.text(c, Alarms.timeText(a), 40f, if (on) Ui.INK else Ui.SUB, bold = true))
+            left.addView(Ui.text(c, Alarms.daysText(a.days), 15f, if (on) Ui.WORK else Ui.SUB, bold = true))
+            if (a.memo.isNotBlank()) left.addView(Ui.text(c, a.memo, 16f, if (on) Ui.INK else Ui.SUB),
+                Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 2)))
+            val snz = Alarms.snoozeAt(c, a.id)
+            val status = when {
+                snz > System.currentTimeMillis() -> "スヌーズ中（もう一度鳴ります）"
+                on -> "次は ${Alarms.nextLabel(a)}"
+                else -> "オフ"
+            }
+            left.addView(Ui.text(c, status, 13f, Ui.SUB), Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 2)))
+            row.addView(left, Ui.lp(0, WRAP_CONTENT, 1f))
+            val sw = Switch(c).apply {
+                isChecked = on
+                scaleX = 1.3f; scaleY = 1.3f
+                setOnCheckedChangeListener { _, checked ->
+                    Alarms.setEnabled(c, a.id, checked)
+                    if (checked) Alarms.get(c, a.id)?.let { toast(Alarms.untilText(it)) }
+                    handler.post { renderAlarms() }
+                }
+            }
+            row.addView(sw, Ui.lp(WRAP_CONTENT, WRAP_CONTENT))
+            card.addView(row)
+            card.setOnClickListener { openEditor(a) }
+            alarmList.addView(card, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 10)))
+        }
+    }
+
+    /** アラームの登録・直す画面 */
+    private fun openEditor(orig: Alarms.Alarm?) {
+        val c = this
+        val now = Calendar.getInstance()
+        val box = LinearLayout(c).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = Ui.dp(c, 20); setPadding(p, Ui.dp(c, 8), p, Ui.dp(c, 8))
+        }
+
+        // 時刻（くるくる回して選ぶ）
+        box.addView(Ui.text(c, "時刻", 15f, Ui.SUB, bold = true))
+        val timeRow = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        val hp = NumberPicker(c).apply {
+            minValue = 0; maxValue = 23; setFormatter { "%02d".format(it) }
+            value = orig?.hour ?: now.get(Calendar.HOUR_OF_DAY)
+            descendantFocusability = NumberPicker.FOCUS_BLOCK_DESCENDANTS
+        }
+        val mp = NumberPicker(c).apply {
+            minValue = 0; maxValue = 59; setFormatter { "%02d".format(it) }
+            value = orig?.minute ?: ((now.get(Calendar.MINUTE) / 5 + 1) * 5 % 60)
+            descendantFocusability = NumberPicker.FOCUS_BLOCK_DESCENDANTS
+        }
+        timeRow.addView(hp)
+        timeRow.addView(Ui.text(c, "：", 30f, bold = true))
+        timeRow.addView(mp)
+        box.addView(timeRow)
+
+        // 曜日
+        box.addView(Ui.text(c, "くり返す曜日（選ばない＝1回だけ）", 15f, Ui.SUB, bold = true),
+            Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 14)))
+        var days = orig?.days ?: 0
+        val dayBtns = ArrayList<Button>()
+        val daysLabel = Ui.text(c, "", 14f, Ui.WORK, bold = true)
+        fun paintDays() {
+            dayBtns.forEachIndexed { i, b ->
+                val sel = (days and (1 shl i)) != 0
+                b.background = Ui.round(if (sel) Ui.WORK else Ui.CHIP, 12, c)
+                b.setTextColor(if (sel) 0xFFFFFFFF.toInt() else Ui.INK)
+            }
+            daysLabel.text = "→ " + Alarms.daysText(days)
+        }
+        val dayRow = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
+        for (i in 0..6) {
+            val b = Ui.button(c, Alarms.DAY_NAMES[i].toString(), Ui.CHIP, Ui.INK, 15f, 44) {
+                days = days xor (1 shl i); paintDays()
+            }
+            b.setPadding(0, 0, 0, 0)
+            dayBtns.add(b)
+            dayRow.addView(b, Ui.lp(0, WRAP_CONTENT, 1f).apply { if (i > 0) leftMargin = Ui.dp(c, 4) })
+        }
+        box.addView(dayRow, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 6)))
+        val quick = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("平日" to Alarms.WEEKDAYS, "毎日" to Alarms.EVERYDAY, "1回だけ" to 0).forEachIndexed { i, (name, v) ->
+            quick.addView(Ui.button(c, name, 0xFFF3EFE9.toInt(), Ui.INK, 14f, 40) { days = v; paintDays() },
+                Ui.lp(0, WRAP_CONTENT, 1f).apply { if (i > 0) leftMargin = Ui.dp(c, 6) })
+        }
+        box.addView(quick, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 6)))
+        box.addView(daysLabel, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 4)))
+        paintDays()
+
+        // メモ
+        box.addView(Ui.text(c, "メモ（鳴ったときに表示）", 15f, Ui.SUB, bold = true),
+            Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 14)))
+        val memo = EditText(c).apply {
+            hint = "例：会議の準備、生成AIパスポートの勉強"
+            setText(orig?.memo ?: "")
+            textSize = 17f
+            isSingleLine = true
+        }
+        box.addView(memo, Ui.lp(MATCH_PARENT, WRAP_CONTENT))
+
+        // 音
+        box.addView(Ui.text(c, "音", 15f, Ui.SUB, bold = true),
+            Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 14)))
+        editSound = orig?.sound ?: ""
+        val soundLabel = Ui.text(c, Alarms.soundTitle(c, editSound), 17f, bold = true)
+        editSoundLabel = soundLabel
+        box.addView(soundLabel, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 2)))
+        val soundRow = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
+        soundRow.addView(Ui.button(c, "音を選ぶ", Ui.INK, 0xFFFFFFFF.toInt(), 15f, 46) { pickSound() },
+            Ui.lp(0, WRAP_CONTENT, 1f))
+        soundRow.addView(Ui.button(c, "試しに鳴らす", 0xFFF3EFE9.toInt(), Ui.INK, 15f, 46) { playPreview(editSound) },
+            Ui.lp(0, WRAP_CONTENT, 1f).apply { leftMargin = Ui.dp(c, 8) })
+        box.addView(soundRow, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 6)))
+
+        val dlg = AlertDialog.Builder(c)
+            .setTitle(if (orig == null) "アラームを追加" else "アラームを直す")
+            .setView(ScrollView(c).apply { addView(box) })
+            .setPositiveButton("保存") { _, _ ->
+                stopPreview()
+                val a = Alarms.Alarm(
+                    id = orig?.id ?: Alarms.newId(c),
+                    hour = hp.value, minute = mp.value, days = days,
+                    memo = memo.text.toString().trim(), sound = editSound, enabled = true)
+                Alarms.upsert(c, a)
+                toast(Alarms.untilText(a))
+                renderAlarms()
+            }
+            .setNegativeButton("やめる") { _, _ -> stopPreview() }
+        if (orig != null) {
+            dlg.setNeutralButton("削除") { _, _ ->
+                stopPreview()
+                AlertDialog.Builder(c)
+                    .setMessage("${Alarms.timeText(orig)} のアラームを削除しますか？")
+                    .setPositiveButton("削除する") { _, _ -> Alarms.delete(c, orig.id); renderAlarms() }
+                    .setNegativeButton("やめる", null)
+                    .show()
+            }
+        }
+        dlg.setOnDismissListener { editSoundLabel = null }
+        dlg.show()
+    }
+
+    private fun pickSound() {
+        val i = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "アラームの音を選ぶ")
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI,
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,
+                if (editSound.isBlank()) RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM) else Uri.parse(editSound))
+        try { startActivityForResult(i, PICK_SOUND) } catch (e: Exception) { toast("音の一覧を開けませんでした") }
+    }
+
+    @Deprecated("Activity の古い受け取り方（このアプリでは問題なし）")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != PICK_SOUND || resultCode != RESULT_OK || data == null) return
+        @Suppress("DEPRECATION")
+        val uri = data.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+        val def = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+        editSound = if (uri == null || uri == def) "" else uri.toString()
+        editSoundLabel?.text = Alarms.soundTitle(this, editSound)
+    }
+
+    private fun playPreview(sound: String) {
+        stopPreview()
+        try {
+            val r = RingtoneManager.getRingtone(this, Alarms.previewUri(sound)) ?: return
+            r.audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+            r.play()
+            preview = r
+            handler.postDelayed({ stopPreview() }, 4000)
+        } catch (e: Exception) { toast("音を鳴らせませんでした") }
+    }
+
+    private fun stopPreview() {
+        try { preview?.stop() } catch (e: Exception) { }
+        preview = null
+    }
+
+    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
+
+    // ================= 許可 =================
     private fun notificationsAllowed(): Boolean = Timer.nm(this).areNotificationsEnabled()
 
     private fun permissionProblem(): String? = when {
