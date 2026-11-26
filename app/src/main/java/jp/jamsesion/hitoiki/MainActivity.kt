@@ -353,6 +353,18 @@ class MainActivity : Activity() {
         timeRow.addView(mp)
         box.addView(timeRow)
 
+        // メモ
+        box.addView(Ui.text(c, "メモ（鳴ったときに表示）", 15f, Ui.SUB, bold = true),
+            Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 10)))
+        val memo = EditText(c).apply {
+            hint = "例：会議の準備、生成AIパスポートの勉強"
+            setText(orig?.memo ?: "")
+            textSize = 17f
+            isSingleLine = true
+        }
+        box.addView(memo, Ui.lp(MATCH_PARENT, WRAP_CONTENT))
+
+
         // くり返し（曜日 または 毎月の日にち。どちらも選ばない＝1回だけ）
         box.addView(Ui.text(c, "くり返し（何も選ばない＝1回だけ）", 15f, Ui.SUB, bold = true),
             Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 14)))
@@ -417,17 +429,6 @@ class MainActivity : Activity() {
             Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 4)))
         box.addView(daysLabel, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 8)))
         paintDays()
-
-        // メモ
-        box.addView(Ui.text(c, "メモ（鳴ったときに表示）", 15f, Ui.SUB, bold = true),
-            Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 14)))
-        val memo = EditText(c).apply {
-            hint = "例：会議の準備、生成AIパスポートの勉強"
-            setText(orig?.memo ?: "")
-            textSize = 17f
-            isSingleLine = true
-        }
-        box.addView(memo, Ui.lp(MATCH_PARENT, WRAP_CONTENT))
 
         // スヌーズの時間
         box.addView(Ui.text(c, "スヌーズ（もう一度鳴るまでの時間）", 15f, Ui.SUB, bold = true),
