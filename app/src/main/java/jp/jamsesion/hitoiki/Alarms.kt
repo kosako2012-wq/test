@@ -33,7 +33,8 @@ object Alarms {
         val id: Int, val hour: Int, val minute: Int, val days: Int,
         val memo: String, val sound: String, val enabled: Boolean,
         val snooze: Int = SNOOZE_MIN,
-        val monthDays: Int = 0          // 毎月の日にち：1日=1, 2日=2, 3日=4 … の合計
+        val monthDays: Int = 0,         // 毎月の日にち：1日=1, 2日=2, 3日=4 … の合計
+        val date: Int = 0               // 1回だけの日付（例：20261129）。0＝次にその時刻が来たとき
     )
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -47,7 +48,7 @@ object Alarms {
             val o = arr.optJSONObject(i) ?: continue
             out.add(Alarm(o.optInt("id"), o.optInt("h"), o.optInt("m"), o.optInt("d"),
                 o.optString("memo"), o.optString("sound"), o.optBoolean("on", true),
-                o.optInt("snz", SNOOZE_MIN), o.optInt("md", 0)))
+                o.optInt("snz", SNOOZE_MIN), o.optInt("md", 0), o.optInt("dt", 0)))
         }
         return out.sortedWith(compareBy<Alarm>({ it.hour }, { it.minute }))
     }
@@ -56,7 +57,7 @@ object Alarms {
         val arr = JSONArray()
         items.forEach { a ->
             arr.put(JSONObject().put("id", a.id).put("h", a.hour).put("m", a.minute)
-                .put("d", a.days).put("memo", a.memo).put("sound", a.sound).put("on", a.enabled).put("snz", a.snooze).put("md", a.monthDays))
+                .put("d", a.days).put("memo", a.memo).put("sound", a.sound).put("on", a.enabled).put("snz", a.snooze).put("md", a.monthDays).put("dt", a.date))
         }
         prefs(ctx).edit().putString("list", arr.toString()).apply()
         cleanChannels(ctx, items)
@@ -89,6 +90,10 @@ object Alarms {
             timeInMillis = from
             set(Calendar.HOUR_OF_DAY, a.hour); set(Calendar.MINUTE, a.minute)
             set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        if (a.days == 0 && a.monthDays == 0 && a.date != 0) {
+            base.set(a.date / 10000, a.date / 100 % 100 - 1, a.date % 100)
+            return base.timeInMillis   // 過ぎていれば今より前の時刻（鳴らさない）
         }
         val span = if (a.monthDays != 0) 400 else 7
         for (i in 0..span) {
@@ -131,7 +136,9 @@ object Alarms {
 
     fun schedule(ctx: Context, a: Alarm) {
         am(ctx).cancel(firePI(ctx, a.id, false))
-        if (a.enabled) setAt(ctx, nextTime(a), firePI(ctx, a.id, false))
+        if (!a.enabled) return
+        val at = nextTime(a)
+        if (at > System.currentTimeMillis()) setAt(ctx, at, firePI(ctx, a.id, false))
     }
 
     private fun cancelSnooze(ctx: Context, id: Int) {
@@ -271,9 +278,17 @@ object Alarms {
     fun timeText(a: Alarm): String = "%02d:%02d".format(a.hour, a.minute)
 
     /** くり返しの表示：「毎月 1日・15日」「平日（月〜金）」「1回だけ」 */
-    fun repeatText(days: Int, monthDays: Int): String =
-        if (monthDays != 0) "毎月 " + (1..31).filter { (monthDays and (1 shl (it - 1))) != 0 }.joinToString("・") { "${it}日" }
+    fun repeatText(days: Int, monthDays: Int, date: Int = 0): String =
+        if (days == 0 && monthDays == 0 && date != 0) "1回だけ（${dateText(date)}）"
+        else if (monthDays != 0) "毎月 " + (1..31).filter { (monthDays and (1 shl (it - 1))) != 0 }.joinToString("・") { "${it}日" }
         else daysText(days)
+
+    /** 20261129 → 「11/29（日）」 */
+    fun dateText(date: Int): String {
+        val c = Calendar.getInstance().apply { set(date / 10000, date / 100 % 100 - 1, date % 100) }
+        val y = if (date / 10000 != Calendar.getInstance().get(Calendar.YEAR)) "${date / 10000}/" else ""
+        return "$y${date / 100 % 100}/${date % 100}（${DAY_NAMES[dayIndex(c)]}）"
+    }
 
     fun daysText(days: Int): String = when (days) {
         0 -> "1回だけ"
