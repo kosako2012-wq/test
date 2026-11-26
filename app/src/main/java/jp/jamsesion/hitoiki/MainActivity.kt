@@ -275,7 +275,7 @@ class MainActivity : Activity() {
         note.addView(Ui.text(c, "アラームの使い方", 16f, bold = true))
         note.addView(Ui.text(c,
             "・カードを押すと、時刻・曜日・メモ・音を直せます。右のスイッチでオン／オフ。\n" +
-            "・曜日を選ばないと「1回だけ」。鳴ったあと自動でオフになります。\n" +
+            "・くり返しは「毎週（曜日）」か「毎月（日にち）」から選べます。何も選ばないと「1回だけ」で、鳴ったあと自動でオフになります。\n" +
             "・鳴ると、画面が消えていても、YouTubeなどを見ていても、画面いっぱいに「止める」「○分後にもう一度」（スヌーズ）が出ます。スヌーズの時間はアラームごとに選べます。\n" +
             "・押さなくても3分で音は止まります。\n" +
             "・音の大きさは、Galaxyの「アラーム」の音量で決まります。",
@@ -299,7 +299,7 @@ class MainActivity : Activity() {
             val left = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
             val on = a.enabled
             left.addView(Ui.text(c, Alarms.timeText(a), 40f, if (on) Ui.INK else Ui.SUB, bold = true))
-            left.addView(Ui.text(c, Alarms.daysText(a.days) + "　スヌーズ${a.snooze}分", 15f, if (on) Ui.WORK else Ui.SUB, bold = true))
+            left.addView(Ui.text(c, Alarms.repeatText(a.days, a.monthDays) + "　スヌーズ${a.snooze}分", 15f, if (on) Ui.WORK else Ui.SUB, bold = true))
             if (a.memo.isNotBlank()) left.addView(Ui.text(c, a.memo, 16f, if (on) Ui.INK else Ui.SUB),
                 Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 2)))
             val snz = Alarms.snoozeAt(c, a.id)
@@ -353,37 +353,69 @@ class MainActivity : Activity() {
         timeRow.addView(mp)
         box.addView(timeRow)
 
-        // 曜日
-        box.addView(Ui.text(c, "くり返す曜日（選ばない＝1回だけ）", 15f, Ui.SUB, bold = true),
+        // くり返し（曜日 または 毎月の日にち。どちらも選ばない＝1回だけ）
+        box.addView(Ui.text(c, "くり返し（何も選ばない＝1回だけ）", 15f, Ui.SUB, bold = true),
             Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 14)))
         var days = orig?.days ?: 0
+        var mdays = orig?.monthDays ?: 0
         val dayBtns = ArrayList<Button>()
-        val daysLabel = Ui.text(c, "", 14f, Ui.WORK, bold = true)
+        val mdayBtns = ArrayList<Button>()
+        val daysLabel = Ui.text(c, "", 15f, Ui.WORK, bold = true)
         fun paintDays() {
             dayBtns.forEachIndexed { i, b ->
                 val sel = (days and (1 shl i)) != 0
                 b.background = Ui.round(if (sel) Ui.WORK else Ui.CHIP, 12, c)
                 b.setTextColor(if (sel) 0xFFFFFFFF.toInt() else Ui.INK)
             }
-            daysLabel.text = "→ " + Alarms.daysText(days)
+            mdayBtns.forEachIndexed { i, b ->
+                val sel = (mdays and (1 shl i)) != 0
+                b.background = Ui.round(if (sel) Ui.WORK else Ui.CHIP, 10, c)
+                b.setTextColor(if (sel) 0xFFFFFFFF.toInt() else Ui.INK)
+            }
+            daysLabel.text = "→ " + Alarms.repeatText(days, mdays)
         }
+
+        // 毎週（曜日）
+        box.addView(Ui.text(c, "毎週（曜日で選ぶ）", 14f, Ui.INK, bold = true),
+            Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 6)))
         val dayRow = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
         for (i in 0..6) {
             val b = Ui.button(c, Alarms.DAY_NAMES[i].toString(), Ui.CHIP, Ui.INK, 15f, 44) {
-                days = days xor (1 shl i); paintDays()
+                days = days xor (1 shl i); mdays = 0; paintDays()
             }
             b.setPadding(0, 0, 0, 0)
             dayBtns.add(b)
             dayRow.addView(b, Ui.lp(0, WRAP_CONTENT, 1f).apply { if (i > 0) leftMargin = Ui.dp(c, 4) })
         }
-        box.addView(dayRow, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 6)))
+        box.addView(dayRow, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 4)))
         val quick = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
         listOf("平日" to Alarms.WEEKDAYS, "毎日" to Alarms.EVERYDAY, "1回だけ" to 0).forEachIndexed { i, (name, v) ->
-            quick.addView(Ui.button(c, name, 0xFFF3EFE9.toInt(), Ui.INK, 14f, 40) { days = v; paintDays() },
+            quick.addView(Ui.button(c, name, 0xFFF3EFE9.toInt(), Ui.INK, 14f, 40) { days = v; mdays = 0; paintDays() },
                 Ui.lp(0, WRAP_CONTENT, 1f).apply { if (i > 0) leftMargin = Ui.dp(c, 6) })
         }
         box.addView(quick, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 6)))
-        box.addView(daysLabel, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 4)))
+
+        // 毎月（日にち）
+        box.addView(Ui.text(c, "毎月（日にちで選ぶ）", 14f, Ui.INK, bold = true),
+            Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 12)))
+        var row: LinearLayout? = null
+        for (d in 1..31) {
+            if ((d - 1) % 7 == 0) {
+                row = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
+                box.addView(row, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 4)))
+            }
+            val b = Ui.button(c, "$d", Ui.CHIP, Ui.INK, 14f, 40) {
+                mdays = mdays xor (1 shl (d - 1)); days = 0; paintDays()
+            }
+            b.setPadding(0, 0, 0, 0)
+            mdayBtns.add(b)
+            row!!.addView(b, Ui.lp(0, WRAP_CONTENT, 1f).apply { if ((d - 1) % 7 > 0) leftMargin = Ui.dp(c, 4) })
+        }
+        // 最後の段（29〜31）の残りをあけて、ボタンの大きさをそろえる
+        for (k in 0 until 4) row!!.addView(View(c), Ui.lp(0, WRAP_CONTENT, 1f).apply { leftMargin = Ui.dp(c, 4) })
+        box.addView(Ui.text(c, "※29〜31日がない月は、その日のアラームは鳴りません", 12f, Ui.SUB),
+            Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 4)))
+        box.addView(daysLabel, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 8)))
         paintDays()
 
         // メモ
@@ -439,7 +471,7 @@ class MainActivity : Activity() {
                 stopPreview()
                 val a = Alarms.Alarm(
                     id = orig?.id ?: Alarms.newId(c),
-                    hour = hp.value, minute = mp.value, days = days,
+                    hour = hp.value, minute = mp.value, days = days, monthDays = mdays,
                     memo = memo.text.toString().trim(), sound = editSound, enabled = true,
                     snooze = snz)
                 Alarms.upsert(c, a)

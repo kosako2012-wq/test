@@ -32,7 +32,8 @@ object Alarms {
     data class Alarm(
         val id: Int, val hour: Int, val minute: Int, val days: Int,
         val memo: String, val sound: String, val enabled: Boolean,
-        val snooze: Int = SNOOZE_MIN
+        val snooze: Int = SNOOZE_MIN,
+        val monthDays: Int = 0          // 毎月の日にち：1日=1, 2日=2, 3日=4 … の合計
     )
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -46,7 +47,7 @@ object Alarms {
             val o = arr.optJSONObject(i) ?: continue
             out.add(Alarm(o.optInt("id"), o.optInt("h"), o.optInt("m"), o.optInt("d"),
                 o.optString("memo"), o.optString("sound"), o.optBoolean("on", true),
-                o.optInt("snz", SNOOZE_MIN)))
+                o.optInt("snz", SNOOZE_MIN), o.optInt("md", 0)))
         }
         return out.sortedWith(compareBy<Alarm>({ it.hour }, { it.minute }))
     }
@@ -55,7 +56,7 @@ object Alarms {
         val arr = JSONArray()
         items.forEach { a ->
             arr.put(JSONObject().put("id", a.id).put("h", a.hour).put("m", a.minute)
-                .put("d", a.days).put("memo", a.memo).put("sound", a.sound).put("on", a.enabled).put("snz", a.snooze))
+                .put("d", a.days).put("memo", a.memo).put("sound", a.sound).put("on", a.enabled).put("snz", a.snooze).put("md", a.monthDays))
         }
         prefs(ctx).edit().putString("list", arr.toString()).apply()
         cleanChannels(ctx, items)
@@ -89,10 +90,16 @@ object Alarms {
             set(Calendar.HOUR_OF_DAY, a.hour); set(Calendar.MINUTE, a.minute)
             set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
         }
-        for (i in 0..7) {
+        val span = if (a.monthDays != 0) 400 else 7
+        for (i in 0..span) {
             val c = (base.clone() as Calendar).apply { add(Calendar.DAY_OF_MONTH, i) }
             if (c.timeInMillis <= from) continue
-            if (a.days == 0 || (a.days and (1 shl dayIndex(c))) != 0) return c.timeInMillis
+            val ok = when {
+                a.monthDays != 0 -> (a.monthDays and (1 shl (c.get(Calendar.DAY_OF_MONTH) - 1))) != 0
+                a.days != 0 -> (a.days and (1 shl dayIndex(c))) != 0
+                else -> true
+            }
+            if (ok) return c.timeInMillis
         }
         return base.timeInMillis + 86_400_000L
     }
@@ -153,7 +160,7 @@ object Alarms {
             prefs(ctx).edit().remove("snooze_$id").apply()
         } else {
             if (!a.enabled) return
-            if (a.days == 0) {
+            if (a.days == 0 && a.monthDays == 0) {
                 // 1回だけのアラームは、鳴ったらオフにする
                 saveAll(ctx, list(ctx).map { if (it.id == id) it.copy(enabled = false) else it })
             } else {
@@ -262,6 +269,11 @@ object Alarms {
 
     // ---------- 表示用の言葉 ----------
     fun timeText(a: Alarm): String = "%02d:%02d".format(a.hour, a.minute)
+
+    /** くり返しの表示：「毎月 1日・15日」「平日（月〜金）」「1回だけ」 */
+    fun repeatText(days: Int, monthDays: Int): String =
+        if (monthDays != 0) "毎月 " + (1..31).filter { (monthDays and (1 shl (it - 1))) != 0 }.joinToString("・") { "${it}日" }
+        else daysText(days)
 
     fun daysText(days: Int): String = when (days) {
         0 -> "1回だけ"
