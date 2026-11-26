@@ -68,7 +68,7 @@ class AlarmRingActivity : Activity() {
         stopBtn.background = Ui.round(white, 40, this)
         root.addView(stopBtn, Ui.lp(MATCH_PARENT, 0, 1f, top = Ui.dp(this, 24)))
 
-        val snz = Ui.button(this, "${Alarms.SNOOZE_MIN}分後にもう一度", 0x40FFFFFF, white, 22f, 72) { snooze() }
+        val snz = Ui.button(this, "${a?.snooze ?: Alarms.SNOOZE_MIN}分後にもう一度", 0x40FFFFFF, white, 22f, 72) { snooze() }
         root.addView(snz, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(this, 14)))
 
         root.addView(Ui.text(this, "押さなくても3分で音は止まります", 15f, white, center = true),
@@ -83,7 +83,7 @@ class AlarmRingActivity : Activity() {
 
     private fun snooze() {
         Alarms.snooze(this, alarmId)
-        Toast.makeText(this, "${Alarms.SNOOZE_MIN}分後にもう一度鳴ります", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "${Alarms.get(this, alarmId)?.snooze ?: Alarms.SNOOZE_MIN}分後にもう一度鳴ります", Toast.LENGTH_LONG).show()
         finish()
     }
 

@@ -276,7 +276,7 @@ class MainActivity : Activity() {
         note.addView(Ui.text(c,
             "・カードを押すと、時刻・曜日・メモ・音を直せます。右のスイッチでオン／オフ。\n" +
             "・曜日を選ばないと「1回だけ」。鳴ったあと自動でオフになります。\n" +
-            "・鳴ると、画面が消えていても、YouTubeなどを見ていても、画面いっぱいに「止める」「${Alarms.SNOOZE_MIN}分後にもう一度」が出ます。\n" +
+            "・鳴ると、画面が消えていても、YouTubeなどを見ていても、画面いっぱいに「止める」「○分後にもう一度」（スヌーズ）が出ます。スヌーズの時間はアラームごとに選べます。\n" +
             "・押さなくても3分で音は止まります。\n" +
             "・音の大きさは、Galaxyの「アラーム」の音量で決まります。",
             14f, Ui.SUB), Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 8)))
@@ -299,7 +299,7 @@ class MainActivity : Activity() {
             val left = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
             val on = a.enabled
             left.addView(Ui.text(c, Alarms.timeText(a), 40f, if (on) Ui.INK else Ui.SUB, bold = true))
-            left.addView(Ui.text(c, Alarms.daysText(a.days), 15f, if (on) Ui.WORK else Ui.SUB, bold = true))
+            left.addView(Ui.text(c, Alarms.daysText(a.days) + "　スヌーズ${a.snooze}分", 15f, if (on) Ui.WORK else Ui.SUB, bold = true))
             if (a.memo.isNotBlank()) left.addView(Ui.text(c, a.memo, 16f, if (on) Ui.INK else Ui.SUB),
                 Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 2)))
             val snz = Alarms.snoozeAt(c, a.id)
@@ -397,6 +397,27 @@ class MainActivity : Activity() {
         }
         box.addView(memo, Ui.lp(MATCH_PARENT, WRAP_CONTENT))
 
+        // スヌーズの時間
+        box.addView(Ui.text(c, "スヌーズ（もう一度鳴るまでの時間）", 15f, Ui.SUB, bold = true),
+            Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 14)))
+        var snz = orig?.snooze ?: Alarms.SNOOZE_MIN
+        val snzBtns = ArrayList<Pair<Int, Button>>()
+        fun paintSnz() {
+            snzBtns.forEach { (v, b) ->
+                val sel = v == snz
+                b.background = Ui.round(if (sel) Ui.WORK else Ui.CHIP, 12, c)
+                b.setTextColor(if (sel) 0xFFFFFFFF.toInt() else Ui.INK)
+            }
+        }
+        val snzRow = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
+        Alarms.SNOOZE_CHOICES.forEachIndexed { i, v ->
+            val b = Ui.button(c, "${v}分", Ui.CHIP, Ui.INK, 15f, 44) { snz = v; paintSnz() }
+            snzBtns.add(v to b)
+            snzRow.addView(b, Ui.lp(0, WRAP_CONTENT, 1f).apply { if (i > 0) leftMargin = Ui.dp(c, 6) })
+        }
+        box.addView(snzRow, Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 6)))
+        paintSnz()
+
         // 音
         box.addView(Ui.text(c, "音", 15f, Ui.SUB, bold = true),
             Ui.lp(MATCH_PARENT, WRAP_CONTENT, top = Ui.dp(c, 14)))
@@ -419,7 +440,8 @@ class MainActivity : Activity() {
                 val a = Alarms.Alarm(
                     id = orig?.id ?: Alarms.newId(c),
                     hour = hp.value, minute = mp.value, days = days,
-                    memo = memo.text.toString().trim(), sound = editSound, enabled = true)
+                    memo = memo.text.toString().trim(), sound = editSound, enabled = true,
+                    snooze = snz)
                 Alarms.upsert(c, a)
                 toast(Alarms.untilText(a))
                 renderAlarms()

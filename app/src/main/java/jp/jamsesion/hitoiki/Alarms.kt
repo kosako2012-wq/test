@@ -20,7 +20,8 @@ import java.util.Calendar
  */
 object Alarms {
     private const val PREFS = "alarms"
-    const val SNOOZE_MIN = 5
+    const val SNOOZE_MIN = 5          // 決めていないときのスヌーズ
+    val SNOOZE_CHOICES = listOf(3, 5, 10, 15)
     const val RING_LIMIT_MS = 3 * 60_000L   // 押さなくても3分で止める
     const val DAY_NAMES = "月火水木金土日"
     const val WEEKDAYS = 0b0011111
@@ -30,7 +31,8 @@ object Alarms {
     /** days：月=1, 火=2, 水=4 … 日=64 の合計。0 は「1回だけ」 */
     data class Alarm(
         val id: Int, val hour: Int, val minute: Int, val days: Int,
-        val memo: String, val sound: String, val enabled: Boolean
+        val memo: String, val sound: String, val enabled: Boolean,
+        val snooze: Int = SNOOZE_MIN
     )
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -43,7 +45,8 @@ object Alarms {
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
             out.add(Alarm(o.optInt("id"), o.optInt("h"), o.optInt("m"), o.optInt("d"),
-                o.optString("memo"), o.optString("sound"), o.optBoolean("on", true)))
+                o.optString("memo"), o.optString("sound"), o.optBoolean("on", true),
+                o.optInt("snz", SNOOZE_MIN)))
         }
         return out.sortedWith(compareBy<Alarm>({ it.hour }, { it.minute }))
     }
@@ -52,7 +55,7 @@ object Alarms {
         val arr = JSONArray()
         items.forEach { a ->
             arr.put(JSONObject().put("id", a.id).put("h", a.hour).put("m", a.minute)
-                .put("d", a.days).put("memo", a.memo).put("sound", a.sound).put("on", a.enabled))
+                .put("d", a.days).put("memo", a.memo).put("sound", a.sound).put("on", a.enabled).put("snz", a.snooze))
         }
         prefs(ctx).edit().putString("list", arr.toString()).apply()
         cleanChannels(ctx, items)
@@ -189,7 +192,7 @@ object Alarms {
             .setTimeoutAfter(RING_LIMIT_MS)
             .setColor(Ui.WORK)
             .addAction(Notification.Action.Builder(null, "止める", stopPI).build())
-            .addAction(Notification.Action.Builder(null, "${SNOOZE_MIN}分後にもう一度", snzPI).build())
+            .addAction(Notification.Action.Builder(null, "${a.snooze}分後にもう一度", snzPI).build())
             .build()
         n.flags = n.flags or Notification.FLAG_INSISTENT   // 止めるまで鳴り続ける（最長3分）
         Timer.nm(ctx).notify(notifId(a.id), n)
@@ -206,7 +209,8 @@ object Alarms {
 
     fun snooze(ctx: Context, id: Int) {
         stopRing(ctx, id)
-        val at = System.currentTimeMillis() + SNOOZE_MIN * 60_000L
+        val min = get(ctx, id)?.snooze ?: SNOOZE_MIN
+        val at = System.currentTimeMillis() + min * 60_000L
         prefs(ctx).edit().putLong("snooze_$id", at).apply()
         setAt(ctx, at, firePI(ctx, id, true))
     }
